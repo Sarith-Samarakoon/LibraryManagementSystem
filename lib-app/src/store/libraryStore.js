@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { BOOKS } from "../data/books";
 
 const useLibraryStore = create((set, get) => ({
-  books: BOOKS,
+  books: [...BOOKS], // Spread to create a new array, avoiding direct reference
 
   selectedBook: null,
   isGalleryOpen: false,
@@ -11,8 +11,8 @@ const useLibraryStore = create((set, get) => ({
   closeGallery: () => set({ isGalleryOpen: false }),
 
   selectById: (id) => {
-    const b = get().books.find((x) => x.id === id) || null;
-    set({ selectedBook: b, isGalleryOpen: false });
+    const book = get().books.find((x) => x.id === id) || null;
+    set({ selectedBook: book, isGalleryOpen: false });
   },
 
   closeModal: () => set({ selectedBook: null }),
@@ -25,7 +25,16 @@ const useLibraryStore = create((set, get) => ({
       selectedBook: null,
     })),
 
-  loadBooks: (arr) => set({ books: Array.isArray(arr) ? arr : [] }),
+  loadBooks: (arr) =>
+    set((state) => ({
+      books: Array.isArray(arr) && arr.length > 0 ? [...arr] : [...state.books],
+    })),
+
+  // Debug function to log current books state
+  debugBooks: () => {
+    console.log("Current books:", get().books);
+    return get().books;
+  },
 }));
 
 export default useLibraryStore;

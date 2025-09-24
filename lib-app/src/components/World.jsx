@@ -1,3 +1,4 @@
+// src/components/World.jsx
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { MathUtils } from "three";
@@ -13,9 +14,19 @@ import { makeGLTFLoader } from "../three/loaders/gltf.js";
 import { makeHeightSampler } from "../three/utils/heightfield.js";
 import { makeBookRaycast } from "../three/interaction/booksRaycast.js";
 import { initCharacters } from "../three/characters/index.js";
-
-// NEW: import the statue helper
 import { addHCAStatue } from "../three/props/hcaStatue.js";
+
+import LIBRARY from "../assets/models/amethyst_library_diorama.glb";
+import ROOF from "../assets/models/roof_baked.glb";
+import FISHTANK from "../assets/models/room_aquarium_now_animated.glb";
+import CAR from "../assets/models/free_porsche_911_carrera_4s.glb";
+import DESK from "../assets/models/low_poly_man.glb";
+
+// Two different bookshelf GLBs
+import SHELF_RIGHT from "../assets/models/victorian_bookshelf.glb";
+import SHELF_LEFT from "../assets/models/bookshelf (1).glb";
+import SHELF from "../assets/models/bookshelf (2).glb";
+import SMALL_SHELF from "../assets/models/3d_wall_bookshelf_-_lowpoly.glb";
 
 export default function World() {
   const mountRef = useRef(null);
@@ -44,7 +55,7 @@ export default function World() {
     renderer.toneMappingExposure = 1.0;
     if ("outputColorSpace" in renderer)
       renderer.outputColorSpace = THREE.SRGBColorSpace;
-    else renderer.outputEncoding = THREE.SRGBEncoding;
+    else renderer.outputEncoding = THREE.sRGBEncoding;
 
     mount.appendChild(renderer.domElement);
 
@@ -78,43 +89,271 @@ export default function World() {
     // room
     const room = buildRoom(scene);
 
-    // declarations for cleanup
+    // loader
     const gltfLoader = makeGLTFLoader(renderer);
-    let disposeBooks = null;
+
+    // cleanup refs
+    let disposeRightShelf = null;
+    let disposeLeftShelf = null;
+    let disposeShelf = null;
+    let disposeSmallShelf = null;
+    let disposeLibrary = null;
+    let disposeRoof = null;
+    let disposeFishTank = null;
+    let disposeCar = null;
+    let disposeDesk = null;
     let characters = { update: () => {}, dispose: () => {} };
-    let disposeStatue = null; // NEW
+    let disposeStatue = null;
     const tooltipEl = document.getElementById("book-tooltip");
     let bookUI = { update: () => {}, click: () => {} };
+
+    // Animation mixers
+    let fishTankMixer = null;
+    let deskMixer = null;
 
     // async init
     let cancelled = false;
     (async () => {
       try {
-        const booksRes = await addBookshelfAndBooks({
+        // split books between shelves (adjust as you like)
+        const mid = Math.ceil(books.length / 2);
+        const rightBooks = books.slice(0, mid);
+        const leftBooks = books.slice(mid);
+
+        // RIGHT WALL: Victorian
+        const rightRes = await addBookshelfAndBooks({
           scene,
           room,
           renderer,
           gltfLoader,
-          books,
+          books: rightBooks,
+          modelUrl: SHELF_RIGHT,
+          placement: {
+            position: new THREE.Vector3(12.6, 0, -14.0),
+            rotationY: -Math.PI / 2,
+            scale: 1.5,
+          },
         });
         if (cancelled) return;
-        disposeBooks = booksRes?.dispose ?? null;
+        disposeRightShelf = rightRes?.dispose ?? null;
 
-        // NEW: add the H.C. Andersen statue in front of the room
-        // In src/components/World.jsx inside the async init block
+        // LEFT WALL: Modern (second, different GLB)
+        const leftRes = await addBookshelfAndBooks({
+          scene,
+          room,
+          renderer,
+          gltfLoader,
+          books: leftBooks,
+          modelUrl: SHELF_LEFT,
+          placement: {
+            position: new THREE.Vector3(0.1, 0, -11.0),
+            rotationY: Math.PI / 2,
+            scale: 0.02,
+          },
+          normalizeShelfColorSpace: true,
+        });
+        if (cancelled) return;
+        disposeLeftShelf = leftRes?.dispose ?? null;
+
+        // Additional SHELF closer to right side
+        const shelfRes = await addBookshelfAndBooks({
+          scene,
+          room,
+          renderer,
+          gltfLoader,
+          books: [],
+          modelUrl: SHELF,
+          placement: {
+            position: new THREE.Vector3(7.0, 0.5, -14.0),
+            rotationY: -Math.PI / 2,
+            scale: 1.0,
+          },
+          normalizeShelfColorSpace: true,
+        });
+        if (cancelled) return;
+        disposeShelf = shelfRes?.dispose ?? null;
+
+        // SMALL_SHELF even closer to right side
+        const smallShelfRes = await addBookshelfAndBooks({
+          scene,
+          room,
+          renderer,
+          gltfLoader,
+          books: [],
+          modelUrl: SMALL_SHELF,
+          placement: {
+            position: new THREE.Vector3(10.0, -2.42, -14.0),
+            rotationY: -Math.PI / 2,
+            scale: 0.5,
+          },
+          normalizeShelfColorSpace: true,
+        });
+        if (cancelled) return;
+        disposeSmallShelf = smallShelfRes?.dispose ?? null;
+
+        // LIBRARY diorama on the right side
+        const libraryRes = await new Promise((resolve, reject) => {
+          gltfLoader.load(
+            LIBRARY,
+            (gltf) => {
+              const libraryRoot = gltf.scene;
+              libraryRoot.traverse((child) => {
+                if (child.isMesh) {
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+                }
+              });
+              libraryRoot.position.set(35.0, 0.0, -10.0);
+              libraryRoot.rotation.y = Math.PI / 3;
+              libraryRoot.scale.set(2, 2, 2);
+              room.add(libraryRoot);
+              resolve({ dispose: () => disposeHierarchy(libraryRoot) });
+            },
+            undefined,
+            reject
+          );
+        });
+        if (cancelled) return;
+        disposeLibrary = libraryRes?.dispose ?? null;
+
+        // ROOF on top of the library
+        const roofRes = await new Promise((resolve, reject) => {
+          gltfLoader.load(
+            ROOF,
+            (gltf) => {
+              const roofRoot = gltf.scene;
+              roofRoot.traverse((child) => {
+                if (child.isMesh) {
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+                }
+              });
+              roofRoot.position.set(7.5, 5.5, -4);
+              roofRoot.rotation.y = 0;
+              roofRoot.scale.set(0.056, 0.056, 0.056);
+              room.add(roofRoot);
+              resolve({ dispose: () => disposeHierarchy(roofRoot) });
+            },
+            undefined,
+            reject
+          );
+        });
+        if (cancelled) return;
+        disposeRoof = roofRes?.dispose ?? null;
+
+        // FISHTANK inside the library
+        const fishTankRes = await new Promise((resolve, reject) => {
+          gltfLoader.load(
+            FISHTANK,
+            (gltf) => {
+              const fishTankRoot = gltf.scene;
+              fishTankRoot.traverse((child) => {
+                if (child.isMesh) {
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+                }
+              });
+              fishTankRoot.position.set(14.0, 2.0, -1.0);
+              fishTankRoot.rotation.y = -190;
+              fishTankRoot.scale.set(0.01, 0.01, 0.01);
+              room.add(fishTankRoot);
+
+              fishTankMixer = new THREE.AnimationMixer(fishTankRoot);
+              if (gltf.animations && gltf.animations.length > 0) {
+                const action = fishTankMixer.clipAction(gltf.animations[0]);
+                action.play();
+              }
+
+              resolve({
+                dispose: () => {
+                  if (fishTankMixer) fishTankMixer.stopAll();
+                  disposeHierarchy(fishTankRoot);
+                },
+              });
+            },
+            undefined,
+            reject
+          );
+        });
+        if (cancelled) return;
+        disposeFishTank = fishTankRes?.dispose ?? null;
+
+        // CAR on the left side of the library
+        const carRes = await new Promise((resolve, reject) => {
+          gltfLoader.load(
+            CAR,
+            (gltf) => {
+              const carRoot = gltf.scene;
+              carRoot.traverse((child) => {
+                if (child.isMesh) {
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+                }
+              });
+              // Left side of library (negative x relative to library's position)
+              carRoot.position.set(-4.0, 1.3, -3.0);
+              carRoot.rotation.y = 0; // Match library rotation
+              carRoot.scale.set(2, 2, 2); // Adjust scale to fit
+              room.add(carRoot);
+              resolve({ dispose: () => disposeHierarchy(carRoot) });
+            },
+            undefined,
+            reject
+          );
+        });
+        if (cancelled) return;
+        disposeCar = carRes?.dispose ?? null;
+
+        // DESK in front of the library (animated)
+        const deskRes = await new Promise((resolve, reject) => {
+          gltfLoader.load(
+            DESK,
+            (gltf) => {
+              const deskRoot = gltf.scene;
+              deskRoot.traverse((child) => {
+                if (child.isMesh) {
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+                }
+              });
+              // In front of library (positive z relative to library's position, adjusted for rotation)
+              deskRoot.position.set(7.0, 0.0, 0);
+              deskRoot.rotation.y = 0; // Match library rotation
+              deskRoot.scale.set(0.3, 0.3, 0.3); // Adjust scale to fit
+              room.add(deskRoot);
+
+              deskMixer = new THREE.AnimationMixer(deskRoot);
+              if (gltf.animations && gltf.animations.length > 0) {
+                const action = deskMixer.clipAction(gltf.animations[0]);
+                action.play();
+              }
+
+              resolve({
+                dispose: () => {
+                  if (deskMixer) deskMixer.stopAll();
+                  disposeHierarchy(deskRoot);
+                },
+              });
+            },
+            undefined,
+            reject
+          );
+        });
+        if (cancelled) return;
+        disposeDesk = deskRes?.dispose ?? null;
+
+        // statue
         const statueRes = await addHCAStatue(scene, gltfLoader, heightAt, {
           x: 7.5,
-          z: 7.2,
+          z: 10.2,
           rotationY: MathUtils.degToRad(350),
-          // make the figure itself smaller
-          targetHeight: 3.6, // try 0.5 if you want tiny
-          // keep the pedestal in scale with the figure
+          targetHeight: 3.6,
           pedestal: { w: 0.38, h: 0.14, d: 0.38 },
         });
-
         if (cancelled) return;
         disposeStatue = statueRes?.dispose ?? null;
 
+        // characters + interaction
         characters = await initCharacters(scene, gltfLoader, heightAt);
         if (cancelled) return;
 
@@ -195,7 +434,6 @@ export default function World() {
     function animate() {
       const delta = clock.getDelta();
 
-      // camera move
       velocity.set(0, 0, 0);
       direction.z = Number(move.forward) - Number(move.backward);
       direction.x = Number(move.right) - Number(move.left);
@@ -209,7 +447,10 @@ export default function World() {
         Math.min(3.5, camera.position.y + velocity.y)
       );
 
-      // updates
+      // Update fish tank and desk animations
+      if (fishTankMixer) fishTankMixer.update(delta);
+      if (deskMixer) deskMixer.update(delta);
+
       bookUI.update(camera);
       characters.update(delta);
 
@@ -240,11 +481,37 @@ export default function World() {
         characters.dispose?.();
       } catch {}
       try {
-        disposeBooks?.();
+        disposeRightShelf?.();
+      } catch {}
+      try {
+        disposeLeftShelf?.();
+      } catch {}
+      try {
+        disposeShelf?.();
+      } catch {}
+      try {
+        disposeSmallShelf?.();
+      } catch {}
+      try {
+        disposeLibrary?.();
+      } catch {}
+      try {
+        disposeRoof?.();
+      } catch {}
+      try {
+        disposeFishTank?.();
+      } catch {}
+      try {
+        disposeCar?.();
+      } catch {}
+      try {
+        disposeDesk?.();
       } catch {}
       try {
         disposeStatue?.();
       } catch {}
+      if (fishTankMixer) fishTankMixer.stopAll();
+      if (deskMixer) deskMixer.stopAll();
       disposeHierarchy(scene);
       renderer.dispose();
       if (mount.contains(renderer.domElement))

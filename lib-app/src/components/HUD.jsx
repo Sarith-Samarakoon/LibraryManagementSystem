@@ -8,7 +8,8 @@ export default function HUD() {
     <>
       <div className="absolute top-4 left-4 z-10 text-white">
         <div className="font-bold text-lg">
-          Click to lock pointer. WASD move, Space up, Shift down
+          Click to lock pointer. WASD move, Space up, Shift down, Esc to unlock
+          the pointer
         </div>
         <div className="opacity-80 text-sm">
           Look at a book and click to open details

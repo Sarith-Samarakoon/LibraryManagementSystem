@@ -1,11 +1,10 @@
 // src/three/books/index.js
 import * as THREE from "three";
-import BOOKSHELF from "../../assets/models/victorian_bookshelf.glb";
 
 /**
  * Adds a bookshelf GLB and fills it with books.
  * Uses Slot_* empties if present, otherwise builds procedural slots on boards.
- * Shelf materials are preserved from the GLB.
+ * Preserves shelf materials exactly as authored in the GLB.
  */
 export async function addBookshelfAndBooks({
   scene,
@@ -13,10 +12,19 @@ export async function addBookshelfAndBooks({
   renderer,
   gltfLoader,
   books,
+  modelUrl, // which GLB to load
+  placement = {}, // where to put it
+  normalizeShelfColorSpace = true, // keep true for correct color sampling
 }) {
+  const {
+    position = new THREE.Vector3(14.2, 0, -6.0),
+    rotationY = -Math.PI / 2,
+    scale = 1,
+  } = placement;
+
   const ANISO = renderer.capabilities.getMaxAnisotropy();
 
-  // texture helpers
+  // covers only (the shelf uses its GLB textures/materials)
   const tLoader = new THREE.TextureLoader();
   tLoader.setCrossOrigin("anonymous");
   const loadSRGB = (url) => {
@@ -27,36 +35,37 @@ export async function addBookshelfAndBooks({
     return t;
   };
 
-  // load shelf with original materials
+  // load shelf with ORIGINAL materials intact
   const gltf = await new Promise((resolve, reject) => {
-    gltfLoader.load(BOOKSHELF, resolve, undefined, reject);
+    gltfLoader.load(modelUrl, resolve, undefined, reject);
   });
 
   const shelfRoot = gltf.scene;
 
-  // keep original materials, just correct colorspace and enable shadows
+  // Do not replace materials. Just enable shadows and (optionally) fix colorSpace on base-color maps.
   shelfRoot.traverse((o) => {
     if (!o.isMesh) return;
-    const m = o.material;
-    if (m) {
-      const mats = Array.isArray(m) ? m : [m];
-      mats.forEach((mat) => {
-        if (mat && mat.map && "colorSpace" in mat.map) {
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    mats.forEach((mat) => {
+      if (!mat) return;
+      if (normalizeShelfColorSpace) {
+        if (mat.map && "colorSpace" in mat.map)
           mat.map.colorSpace = THREE.SRGBColorSpace;
-        }
-        mat.needsUpdate = true;
-      });
-    }
+        if (mat.emissiveMap && "colorSpace" in mat.emissiveMap)
+          mat.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        // DO NOT touch roughness/metalness/normal/AO maps; leave linear as-authored
+      }
+      mat.needsUpdate = true;
+    });
     o.castShadow = true;
     o.receiveShadow = true;
   });
 
-  // place at the right side of the room, facing inward
-  const SHELF_POS = new THREE.Vector3(13.2, 0, -14.0);
-  const SHELF_ROT_Y = -Math.PI / 2; // rotate to face the room
-  shelfRoot.position.copy(SHELF_POS);
-  shelfRoot.rotation.y = SHELF_ROT_Y;
-  shelfRoot.scale.set(1, 1, 1);
+  // place shelf
+  shelfRoot.position.copy(position);
+  shelfRoot.rotation.y = rotationY;
+  if (typeof scale === "number") shelfRoot.scale.setScalar(scale);
+  else shelfRoot.scale.set(scale.x ?? 1, scale.y ?? 1, scale.z ?? 1);
   room.add(shelfRoot);
 
   // collect named slots if present
@@ -125,7 +134,7 @@ export async function addBookshelfAndBooks({
     const mesh = new THREE.Mesh(geo, mats);
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.userData = { bookId: b.id, originalMaterials: mats };
-    if (typeof b.yaw === "number") mesh.rotation.y = b.yaw;
+    if (typeof b.yaw === "number") mesh.rotation.y = b.yaw; // optional per-book rotation
     return mesh;
   };
 
@@ -138,9 +147,7 @@ export async function addBookshelfAndBooks({
     let target = null;
     if (b.slot) {
       const s = shelfRoot.getObjectByName(b.slot);
-      if (s && (namedSlots.includes(s) || slots.includes(s)) && !taken.has(s)) {
-        target = s;
-      }
+      if (s && !taken.has(s)) target = s;
     }
     if (!target && slots.length) {
       target = slots.find((s) => !taken.has(s));
@@ -149,8 +156,10 @@ export async function addBookshelfAndBooks({
     if (target) {
       taken.add(target);
       book.position.set(0, 0, 0);
+      // optional: b.zOffset to nudge forward/back slightly
       book.position.z += b.zOffset ?? 0.0;
 
+      // keep covers within shelf depth if auto slot computed clearance
       if (target.userData?.depthClearance) {
         const tHalf = (b.size?.thick ?? 0.032) * 0.5;
         const maxHalf = target.userData.depthClearance * 0.5;
@@ -162,7 +171,7 @@ export async function addBookshelfAndBooks({
 
       target.add(book);
     } else {
-      // tidy fallback row near the demo shelf if we exhaust slots
+      // tidy fallback row
       const baseX = 6.9;
       const stepX = 0.22;
       const maxPerRow = 12;
